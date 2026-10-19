@@ -1,4 +1,7 @@
-# React + Vite
+# Portfolio & Task Management Application
+
+[![CI Pipeline](https://github.com/omghori18/portfolio-awdf/actions/workflows/ci.yml/badge.svg)](https://github.com/omghori18/portfolio-awdf/actions/workflows/ci.yml)
+
 
 This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
 

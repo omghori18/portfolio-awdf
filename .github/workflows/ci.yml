@@ -1,0 +1,69 @@
+name: CI Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # ── JOB 1: Code Linting & Static Analysis (Supplementary Task) ────────
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Verify Code Syntax
+        run: |
+          node -c task-manager-api/server.js
+          node -c task-manager-api/events.js
+          node -c task-manager-api/listeners.js
+
+  # ── JOB 2: Build & Automated Testing ─────────────────────────────────
+  build-and-test:
+    needs: lint
+    runs-on: ubuntu-latest
+
+    # Service container: Spins up clean MongoDB 7 instance for test database
+    services:
+      mongodb:
+        image: mongo:7
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd mongosh
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      # Step 1: Checkout repository code
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Step 2: Setup Node.js runtime environment
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: 'task-manager-api/package-lock.json'
+
+      # Step 3: Install backend dependencies
+      - name: Install dependencies
+        working-directory: task-manager-api
+        run: npm install
+
+      # Step 4: Run automated Jest & Supertest test suite
+      - name: Run automated tests
+        working-directory: task-manager-api
+        env:
+          MONGO_URI: mongodb://localhost:27017/task-manager-ci
+          PORT: 3000
+        run: npm test

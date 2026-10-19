@@ -22,7 +22,9 @@ let cacheStats = { hits: 0, misses: 0 };
 
 // Initialize Express app
 const app = express();
-const PORT = 3000;
+// PORT: reads from env so Docker Compose can inject PORT=5000
+// Falls back to 3000 for local development without Docker
+const PORT = process.env.PORT || 3000;
 
 // ====== STEP 3: EXPRESS SETUP ======
 // JSON middleware - must be first to parse request bodies
@@ -49,10 +51,11 @@ app.use(express.static(__dirname));
 // 2. Connection happens BEFORE routes so routes can use the connection
 
 console.log('Attempting to connect to MongoDB...');
-mongoose.connect(process.env.MONGO_URI)
+const mongoUri = process.env.MONGO_URI || 'mongodb://mongodb:27017/task-manager';
+mongoose.connect(mongoUri)
   .then(() => {
     console.log('✅ MongoDB connected successfully!');
-    console.log(`📍 Connected to: ${process.env.MONGO_URI}`);
+    console.log(`📍 Connected to: ${mongoUri}`);
   })
   .catch((error) => {
     console.error('❌ MongoDB connection error:');
@@ -328,8 +331,13 @@ app.use((err, req, res, next) => {
   });
 });
 
+// ====== EXPORT APP FOR TESTING & CI PIPELINE ======
+module.exports = app;
+
 // ====== START SERVER ======
-app.listen(PORT, () => {
-  console.log(`\n🚀 Server is running on http://localhost:${PORT}`);
-  console.log('📝 API is ready to receive requests\n');
-});
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`\n🚀 Server is running on http://localhost:${PORT}`);
+    console.log('📝 API is ready to receive requests\n');
+  });
+}
