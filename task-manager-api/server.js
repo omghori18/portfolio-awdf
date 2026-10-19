@@ -7,6 +7,18 @@ require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
 const Task = require('./models/Task');
+const NodeCache = require('node-cache');
+
+// ====== PRACTICAL 10: Event-Driven Architecture ======
+// Import our custom TaskEvents singleton (extends Node's built-in EventEmitter)
+const taskEvents = require('./events');
+// Require listeners.js ONCE at startup to register all event listeners
+// IMPORTANT: Must be required before any events are emitted so listeners are active
+require('./listeners');
+
+// Initialize cache with 60 seconds TTL
+const cache = new NodeCache({ stdTTL: 60 });
+let cacheStats = { hits: 0, misses: 0 };
 
 // Initialize Express app
 const app = express();
@@ -75,15 +87,60 @@ app.get('/', (req, res) => {
 // 4. catch block: If error occurs, pass to error handler with next(err)
 app.get('/tasks', async (req, res, next) => {
   try {
+    const cachedTasks = cache.get('all_tasks');
+    if (cachedTasks) {
+      cacheStats.hits++;
+      return res.status(200).json(cachedTasks);
+    }
+    
+    cacheStats.misses++;
     // Query MongoDB for all tasks
     // await = wait for database to respond before continuing
     const tasks = await Task.find();
     
+    cache.set('all_tasks', tasks);
     res.status(200).json(tasks);
   } catch (error) {
     // Pass error to global error handler
     next(error);
   }
+});
+
+// ========================================
+// GET /tasks/:id - Retrieve a SINGLE task (Supplementary)
+// ========================================
+app.get('/tasks/:id', async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const cacheKey = `task_${id}`;
+    
+    const cachedTask = cache.get(cacheKey);
+    if (cachedTask) {
+      cacheStats.hits++;
+      return res.status(200).json(cachedTask);
+    }
+    
+    cacheStats.misses++;
+    const task = await Task.findById(id);
+    if (!task) {
+      return res.status(404).json({ error: 'Task not found' });
+    }
+    
+    cache.set(cacheKey, task);
+    res.status(200).json(task);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ========================================
+// GET /cache-stats - Debug endpoint (Supplementary)
+// ========================================
+app.get('/cache-stats', (req, res) => {
+  res.status(200).json({
+    ...cacheStats,
+    keys: cache.keys()
+  });
 });
 
 // ========================================
@@ -110,8 +167,23 @@ app.post('/tasks', async (req, res, next) => {
       completed: false
     });
 
-    // Return the created task (includes auto-generated _id from MongoDB)
+    // Invalidate cache on write
+    cache.del('all_tasks');
+
+    // ====== PRACTICAL 10: Asynchronous Event Emission ======
+    // STEP 1: Log the API response timestamp FIRST
+    const responseTime = new Date().toISOString();
+    console.log(`[API] Response sent at ${responseTime}`);
+
+    // STEP 2: Send the response to client IMMEDIATELY
     res.status(201).json(newTask);
+
+    // STEP 3: Emit 'task-created' event AFTER response is sent
+    // The listener in listeners.js will handle this asynchronously
+    // KEY PROOF: The listener's console.log (with 2s delay) will appear
+    //            AFTER this response timestamp in the console output
+    taskEvents.emit('task-created', newTask);
+
   } catch (error) {
     // If it's validation error, catch will handle it
     next(error);
@@ -157,6 +229,8 @@ app.put('/tasks/:id', async (req, res, next) => {
       return res.status(404).json({ error: 'Task not found' });
     }
 
+    cache.del('all_tasks'); // Invalidate cache on write
+    cache.del(`task_${id}`); // Invalidate specific task cache
     res.status(200).json(task);
   } catch (error) {
     next(error);
@@ -185,10 +259,22 @@ app.delete('/tasks/:id', async (req, res, next) => {
       return res.status(404).json({ error: 'Task not found' });
     }
 
+    cache.del('all_tasks'); // Invalidate cache on write
+    cache.del(`task_${id}`); // Invalidate specific task cache
+
+    // ====== PRACTICAL 10: Asynchronous Event Emission ======
+    // Log API response timestamp, send response, THEN emit event
+    const responseTime = new Date().toISOString();
+    console.log(`[API] Response sent at ${responseTime}`);
+
     res.status(200).json({ 
       message: 'Task deleted successfully', 
       task: deletedTask 
     });
+
+    // Emit 'task-deleted' event AFTER response is sent (non-blocking)
+    taskEvents.emit('task-deleted', deletedTask);
+
   } catch (error) {
     next(error);
   }
